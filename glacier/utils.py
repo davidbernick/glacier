@@ -5,6 +5,12 @@
 import hashlib, hmac
 from time import strftime, gmtime
 
+def hexhash(data):
+	h = hashlib.sha256()
+	h.update(data)
+	return h.hexdigest()
+
+
 def sha256(value):
 	"""
 		Returns the hexdigested SHA256 hash of the object.
@@ -12,7 +18,8 @@ def sha256(value):
 		:type value: string or file
 	"""
 	if isinstance(value, str):
-		return hashlib.sha256(value).hexdigest()
+		return hexhash(value)
+		#return hashlib.sha256(value).hexdigest()
 	elif isinstance(value, file):
 		return sha256_file(value)
 
@@ -59,15 +66,29 @@ def get_tree_hash(chunk_hashes):
 		
 		:type chunk_hashes: list, tuple
 	"""
-	# shout-out to hareevs for this elegant method!
 
 	hashes = chunk_hashes[:]
 
 	while len(hashes) > 1:
-		hashes = [sha256_digest("".join(hashes[i:i+2]))
-		for i in xrange(0, len(hashes), 2)]
-
+		new_hashes = []
+		while len(hashes) > 0:
+			if len(hashes) > 1:
+				# at least two hashes available
+				first = hashes.pop(0)
+				second = hashes.pop(0)
+				new_hashes.append(sha256_digest(first+second))
+			elif len(hashes) == 1:
+				# just one hash available and because he has no hash partner :(
+				# we move him to the next level as well.
+				new_hashes.append(hashes.pop(0))
+		# move to the next level
+		hashes.extend(new_hashes)
 	return hashes[0].encode("hex")
 
 def time(format="%Y%m%d"):
+	"""
+		Returns the time in a certain format.
+
+		:rtype: string
+	"""
 	return strftime(format, gmtime())

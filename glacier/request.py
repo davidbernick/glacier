@@ -2,7 +2,7 @@
 # Copyright 2012 Paul Engstler
 # See LICENSE for details.
 
-import time, utils, httplib, os, math
+import time, utils, httplib, os, math, hashlib
 
 class Request():
 
@@ -38,6 +38,12 @@ class Request():
 		self.signed_headers.sort()
 		self.body = body
 
+	def hexhash(self,data):
+		h = hashlib.sha256()
+		h.update(data)
+		return h.hexdigest()
+
+
 	def canonical_request(self):
 		# body is hashed here TODO
 		req = self.method + "\n" + self.path + "\n\n"
@@ -45,16 +51,15 @@ class Request():
 			hv = self.header[hk]
 			req += hk.lower()+":"+hv+"\n"
 		req += "\n" + ";".join(self.signed_headers) + "\n"
-		if not self.header["x-amz-content-sha256"]:
-			req += utils.sha256(self.body)
+		if not self.header.get("x-amz-content-sha256"):
+			req += self.hexhash(self.body)
 		else:
 			req += self.header["x-amz-content-sha256"]
 		return req
 
-	def string_to_sign(self,canonical_request):	
+	def string_to_sign(self,canonical_request):
 		return "\n".join(["AWS4-HMAC-SHA256",self.header["x-amz-date"],
-		utils.time("%Y%m%d")+"/us-east-1/glacier/aws4_request",
-		utils.sha256(canonical_request)])
+		"%(time)s/%(region)s/glacier/aws4_request\n%(hashthing)s" % {"time":utils.time("%Y%m%d"),"region": self.region,"hashthing":self.hexhash(canonical_request)}])
     
 	def derived_key(self):
 		kDate = utils.sign(("AWS4" + self.secret_access_key).encode("utf-8"),
@@ -95,15 +100,16 @@ class Request():
 		# Because of the variety of hashes that need to be processed in the
 		# Authorization header it will be baked last.
 		self.header["Authorization"] = self.build_authorization_header()
-
 		# Always via HTTPS!
 		connection = httplib.HTTPSConnection(self.host)
 		# uncomment if you want to debug the network i/o
 		# connection.set_debuglevel(1)
 		connection.connect()
-		connection.request(self.method,self.path,"",self.header)
+		#print "Method:%s\nPath:%s\nHeader:%s\nBody:%s\n\n"% (self.method,self.path,self.header,self.body)
+		#emptycanon implies that AWS is expecting an empty hash for payload, but still wants a body (json)
 		
 		if isinstance(self.body,file):
+			connection.request(self.method,self.path,"",self.header)
 			# stream the file in 10 MB chunks to keep the memory usage low
 			self.body.seek(0)
 			chunk_size = int(1024*1024*10)
@@ -113,6 +119,7 @@ class Request():
 				connection.send(self.body.read(chunk_size))
 		else:
 			# send the full string
-			connection.send(self.body)
+			#connection.send(self.body)
+			connection.request(self.method,self.path,self.body,self.header)
 
 		return connection.getresponse()
